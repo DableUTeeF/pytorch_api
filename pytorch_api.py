@@ -204,7 +204,6 @@ class Model:
             self.lastext = ''
             self.start_epoch_time = time.time()
             self.last_print_time = self.start_epoch_time
-            total_acc = 0
             total = 0
             self.model.train()
             progbar = Progbar(len(generator))
@@ -247,9 +246,7 @@ class Model:
             self.compile('sgd', None)
         self.lastext = ''
         self.start_epoch_time = time.time()
-        acc = 0
         total = 0
-        total_loss = 0
         self.model.eval()
         history_log = {}
         with torch.no_grad():
