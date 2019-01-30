@@ -22,7 +22,7 @@ class Model:
         self.model.to(self.device)
         self.loss.to(self.device)
 
-    def compile(self, optimizer, loss, metric=None):
+    def compile(self, optimizer, loss, metric=None, device='cpu'):
         if optimizer in ['sgd', 'SGD']:
             self.optimizer = torch.optim.SGD(self.model.parameters(),
                                              lr=0.1,
@@ -49,6 +49,7 @@ class Model:
         else:
             self.metric = [metric]
         self.metric.append(self.loss)
+        self.to(device)
 
     def fit_generator(self, generator, epoch, validation_data=None, lrstep=None):
         if self.loss is None:
@@ -134,7 +135,7 @@ class Model:
     class bce_accuracy:
         def __call__(self, inputs, targets):
             predict = torch.round(inputs)
-            return torch.sum(predict.float() == targets.float())
+            return torch.sum(predict == targets.float())
 
         def __str__(self):
             return 'bce_accuracy()'
