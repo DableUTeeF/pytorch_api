@@ -2,7 +2,7 @@ import torch
 from torch import nn
 import time
 from .utils import Progbar
-
+from torch.optim.optimizer import Optimizer
 
 class Model:
     def __init__(self, model, optimizer=None, loss=None):
@@ -33,7 +33,7 @@ class Model:
                                               lr=0.01,
                                               weight_decay=1e-4)
         else:
-            assert isinstance(optimizer, torch.optim.optimizer.Optimizer), 'Optimizer should be an Optimizer object'
+            assert isinstance(optimizer, Optimizer), 'Optimizer should be an Optimizer object'
             self.optimizer = optimizer
         if loss is not None:
             self.loss = loss
