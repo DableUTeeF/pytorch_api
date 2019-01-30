@@ -1,4 +1,4 @@
-import models
+from natthaphon import Model
 import torch.nn as nn
 import torch
 import numpy as np
@@ -33,7 +33,7 @@ class GenTest:
 
 
 if __name__ == '__main__':
-    model = models.Model(M())
+    model = Model(M())
     model.compile('sgd', nn.BCELoss(), 'acc')
     h = model.fit_generator(GenTest(), 1, validation_data=GenTest())
     print(h)

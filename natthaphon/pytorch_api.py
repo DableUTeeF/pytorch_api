@@ -39,7 +39,7 @@ class Model:
             self.loss = loss
         else:
             self.loss = nn.BCELoss()
-        if metric == 'acc' or 'accuracy':
+        if metric == 'acc' or metric == 'accuracy':
             if isinstance(loss, nn.BCELoss):
                 self.metric = [self.bce_accuracy()]
             elif isinstance(loss, nn.CrossEntropyLoss):  # loss == nn.CrossEntropyLoss():
@@ -134,7 +134,7 @@ class Model:
     class bce_accuracy:
         def __call__(self, inputs, targets):
             predict = torch.round(inputs)
-            return torch.sum(predict == targets.float())
+            return torch.sum(predict.float() == targets.float())
 
         def __str__(self):
             return 'bce_accuracy()'
