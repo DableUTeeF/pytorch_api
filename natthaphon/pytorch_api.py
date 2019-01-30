@@ -79,6 +79,7 @@ class Model:
         # todo: change enumerate(generator) to keras enqueuer
         # todo: test enqueuer multithread and DataLoader multiprocess speed
         # todo: add evaluate, predict from array
+        # todo: use function.__name__ and object.__str__() separately
         try:
             for e in range(epoch):
                 print('Epoch:', e+1)
