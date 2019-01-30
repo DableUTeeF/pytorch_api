@@ -68,12 +68,17 @@ class Model:
         self.to(device)
 
     def fit_generator(self, generator, epoch, validation_data=None, lrstep=None):
+        if len(generator) < 1:
+            raise ValueError('generator length < 0')
         if self.loss is None:
             self.compile('sgd', None)
         if lrstep:
             schedule = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,
                                                             lrstep)
         log = {}
+        # todo: change enumerate(generator) to keras enqueuer
+        # todo: test enqueuer multithread and DataLoader multiprocess speed
+        # todo: add evaluate, predict from array
         try:
             for e in range(epoch):
                 print('Epoch:', e+1)
@@ -104,7 +109,7 @@ class Model:
                     self.optimizer.step()
                     total += inputs.size(0)
 
-                    progbar.update(idx-1, printlog)
+                    progbar.update(idx, printlog)
 
                 for h in history_log:
                     history_log[h] = history_log[h] / len(generator)
@@ -113,6 +118,9 @@ class Model:
                     val_metrics = self.evaluate_generator(validation_data)
                     for metric in val_metrics:
                         metrics.append(['val_'+metric, val_metrics[metric]])
+                        if 'val_'+metric not in log:
+                            log['val_'+metric] = []
+                        log['val_'+metric].append(val_metrics[metric])
                 progbar.update(len(generator), metrics, force=True)
                 if lrstep:
                     schedule.step()
@@ -127,6 +135,8 @@ class Model:
             return log
 
     def evaluate_generator(self, generator):
+        if len(generator) < 1:
+            raise ValueError('generator length < 0')
         if self.loss is None:
             self.compile('sgd', None)
         self.lastext = ''
@@ -212,6 +222,9 @@ class Model:
                     val_metrics = self.evaluate_generator(validation_data)
                     for metric in val_metrics:
                         metrics.append(['val_'+metric, val_metrics[metric]])
+                        if 'val_'+metric not in log:
+                            log['val_'+metric] = []
+                        log['val_'+metric].append(val_metrics[metric])
                 progbar.update(step_per_epoch, metrics, force=True)
                 if lrstep:
                     schedule.step()
