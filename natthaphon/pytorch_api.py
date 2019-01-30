@@ -199,47 +199,56 @@ class Model:
         if lrstep:
             schedule = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,
                                                             lrstep)
-        for e in range(epoch):
-            print('Epoch:', e+1)
-            self.lastext = ''
-            self.start_epoch_time = time.time()
-            self.last_print_time = self.start_epoch_time
-            total = 0
-            self.model.train()
-            progbar = Progbar(len(generator))
-            history_log = {}
-            for idx, (inputs, targets) in enumerate(generator):
-                inputs = inputs.to(self.device)
-                targets = targets.to(self.device)
-                # inputs = inputs.permute(0, 1, 4, 2, 3).float()
-                output = self.model(inputs)
-                printlog = []
-                for metric in self.metric:
-                    m_out = metric(output, targets)
-                    if metric.__str__()[:-2] not in history_log:
-                        history_log[metric.__str__()[:-2]] = m_out.cpu().detach().numpy()
-                        printlog.append([metric.__str__()[:-2], m_out.cpu().detach().numpy()])
-                    else:
-                        history_log[metric.__str__()[:-2]] += m_out.cpu().detach().numpy()
-                        printlog.append([metric.__str__()[:-2], history_log[metric.__str__()[:-2]]/(idx+1)])
+        log = {}
+        try:
+            for e in range(epoch):
+                print('Epoch:', e+1)
+                self.lastext = ''
+                self.start_epoch_time = time.time()
+                self.last_print_time = self.start_epoch_time
+                total = 0
+                self.model.train()
+                progbar = Progbar(len(generator))
+                history_log = {}
+                for idx, (inputs, targets) in enumerate(generator):
+                    inputs = inputs.to(self.device)
+                    targets = targets.to(self.device)
+                    # inputs = inputs.permute(0, 1, 4, 2, 3).float()
+                    output = self.model(inputs)
+                    printlog = []
+                    for metric in self.metric:
+                        m_out = metric(output, targets)
+                        if metric.__str__()[:-2] not in history_log:
+                            history_log[metric.__str__()[:-2]] = m_out.cpu().detach().numpy()
+                            printlog.append([metric.__str__()[:-2], m_out.cpu().detach().numpy()])
+                        else:
+                            history_log[metric.__str__()[:-2]] += m_out.cpu().detach().numpy()
+                            printlog.append([metric.__str__()[:-2], history_log[metric.__str__()[:-2]]/(idx+1)])
 
-                self.optimizer.zero_grad()
-                m_out.backward()
-                self.optimizer.step()
-                total += inputs.size(0)
+                    self.optimizer.zero_grad()
+                    m_out.backward()
+                    self.optimizer.step()
+                    total += inputs.size(0)
 
-                progbar.update(idx-1, printlog)
+                    progbar.update(idx-1, printlog)
 
-            for h in history_log:
-                history_log[h] = history_log[h] / len(generator)
-            metrics = []
-            if validation_data:
-                val_metrics = self.evaluate_generator(validation_data)
-                for metric in val_metrics:
-                    metrics.append(['val_'+metric, val_metrics[metric]])
-            progbar.update(len(generator), metrics, force=True)
-            if lrstep:
-                schedule.step()
+                for h in history_log:
+                    history_log[h] = history_log[h] / len(generator)
+                metrics = []
+                if validation_data:
+                    val_metrics = self.evaluate_generator(validation_data)
+                    for metric in val_metrics:
+                        metrics.append(['val_'+metric, val_metrics[metric]])
+                progbar.update(len(generator), metrics, force=True)
+                if lrstep:
+                    schedule.step()
+                for key in history_log:
+                    if key not in log:
+                        log[key] = []
+                    log[key].append(history_log[key])
+
+        finally:
+            return log
 
     def evaluate_generator(self, generator):
         if self.loss is None:
@@ -280,3 +289,9 @@ class Model:
 
         def __str__(self):
             return 'categorical_accuracy()'
+
+    def save_weights(self, path):
+        state = {
+            'net': self.model.state_dict(),
+        }
+        torch.save(state, path)
