@@ -35,5 +35,5 @@ class GenTest:
 if __name__ == '__main__':
     model = Model(M())
     model.compile('sgd', nn.BCELoss(), 'acc')
-    h = model.fit_generator(GenTest(), 1, validation_data=GenTest())
+    h = model.fit_generator(GenTest(), 10000, validation_data=GenTest())
     print(h)

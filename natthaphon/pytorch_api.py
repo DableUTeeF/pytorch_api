@@ -120,6 +120,8 @@ class Model:
                     if key not in log:
                         log[key] = []
                     log[key].append(history_log[key])
+        except KeyboardInterrupt:
+            pass
 
         finally:
             return log
@@ -217,6 +219,8 @@ class Model:
                     if key not in log:
                         log[key] = []
                     log[key].append(history_log[key])
+        except KeyboardInterrupt:
+            pass
 
         finally:
             return log
