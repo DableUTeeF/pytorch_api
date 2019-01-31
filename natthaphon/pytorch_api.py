@@ -36,6 +36,13 @@ class Model:
             assert isinstance(optimizer, Optimizer), 'Optimizer should be an Optimizer object'
             self.optimizer = optimizer
         if loss is not None:
+            if isinstance(loss, str):
+                if loss == 'categorical_crossentropy' or loss == 'crossentropy':
+                    self.loss = nn.CrossEntropyLoss()
+                elif loss == 'binary_crossentropy' or loss == 'bce':
+                    self.loss = nn.BCELoss()
+                else:
+                    raise ValueError('Invalid string loss')
             self.loss = loss
         else:
             self.loss = nn.BCELoss()
@@ -67,19 +74,22 @@ class Model:
         self.metric.append(self.loss)
         self.to(device)
 
-    def fit_generator(self, generator, epoch, validation_data=None, lrstep=None):
+    def fit_generator(self, generator, epoch, validation_data=None, schedule=None):
         if len(generator) < 1:
             raise ValueError('generator length < 0')
         if self.loss is None:
             self.compile('sgd', None)
-        if lrstep:
+        if type(schedule) == list or type(schedule) == tuple:
             schedule = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,
-                                                            lrstep)
+                                                            schedule)
         log = {}
         # todo: change enumerate(generator) to keras enqueuer
         # todo: test enqueuer multithread and DataLoader multiprocess speed
         # todo: add evaluate, predict from array
         # todo: use function.__name__ and object.__str__() separately
+        # todo: use train_on_batch and add log from every batch option
+        # todo: add auto permute option
+        # todo: delay before second KeyboardInterupt
         try:
             for e in range(epoch):
                 print('Epoch:', e+1)
@@ -97,13 +107,17 @@ class Model:
                     output = self.model(inputs)
                     printlog = []
                     for metric in self.metric:
-                        m_out = metric(output, targets)
-                        if metric.__str__()[:-2] not in history_log:
-                            history_log[metric.__str__()[:-2]] = m_out.cpu().detach().numpy()
-                            printlog.append([metric.__str__()[:-2], m_out.cpu().detach().numpy()])
+                        if hasattr(metric, '__name__'):
+                            mname = metric.__name__
                         else:
-                            history_log[metric.__str__()[:-2]] += m_out.cpu().detach().numpy()
-                            printlog.append([metric.__str__()[:-2], history_log[metric.__str__()[:-2]]/(idx+1)])
+                            mname = metric.__str__()[:-2]
+                        m_out = metric(output, targets)
+                        if mname not in history_log:
+                            history_log[mname] = m_out.cpu().detach().numpy()
+                            printlog.append([mname, m_out.cpu().detach().numpy()])
+                        else:
+                            history_log[mname] += m_out.cpu().detach().numpy()
+                            printlog.append([mname, history_log[mname]/(idx+1)])
 
                     self.optimizer.zero_grad()
                     m_out.backward()
@@ -123,7 +137,7 @@ class Model:
                             log['val_'+metric] = []
                         log['val_'+metric].append(val_metrics[metric])
                 progbar.update(len(generator), metrics, force=True)
-                if lrstep:
+                if schedule:
                     schedule.step()
                 for key in history_log:
                     if key not in log:
@@ -148,14 +162,18 @@ class Model:
         with torch.no_grad():
             for idx, (inputs, targets) in enumerate(generator):
                 inputs = inputs.to(self.device)
-                targets = targets.to(self.device).float()
+                targets = targets.to(self.device)
                 outputs = self.model(inputs)
                 for metric in self.metric:
-                    m_out = metric(outputs, targets)
-                    if metric.__str__()[:-2] not in history_log:
-                        history_log[metric.__str__()[:-2]] = m_out.cpu().detach().numpy()
+                    if hasattr(metric, '__name__'):
+                        mname = metric.__name__
                     else:
-                        history_log[metric.__str__()[:-2]] += m_out.cpu().detach().numpy()
+                        mname = metric.__str__()[:-2]
+                    m_out = metric(outputs, targets)
+                    if mname not in history_log:
+                        history_log[mname] = m_out.cpu().detach().numpy()
+                    else:
+                        history_log[mname] += m_out.cpu().detach().numpy()
                 total += inputs.size(0)
             for h in history_log:
                 history_log[h] = history_log[h] / len(generator)
@@ -242,7 +260,7 @@ class Model:
     class bce_accuracy:
         def __call__(self, inputs, targets):
             predict = torch.round(inputs)
-            return torch.sum(predict == targets.float())
+            return torch.sum(predict == targets.float()).double()/targets.size(0)
 
         def __str__(self):
             return 'bce_accuracy()'
@@ -250,7 +268,7 @@ class Model:
     class categorical_accuracy:
         def __call__(self, inputs, targets):
             _, predicted = inputs.max(1)
-            return predicted.eq(targets.long()).sum()
+            return predicted.eq(targets.long()).double().sum()/targets.size(0)
 
         def __str__(self):
             return 'categorical_accuracy()'
