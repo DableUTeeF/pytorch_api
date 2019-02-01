@@ -3,6 +3,9 @@ from torch import nn
 import time
 from .utils import Progbar
 from torch.optim.optimizer import Optimizer
+import os
+import json
+
 
 class Model:
     def __init__(self, model, optimizer=None, loss=None):
@@ -86,13 +89,11 @@ class Model:
         # todo: change enumerate(generator) to keras enqueuer
         # todo: test enqueuer multithread and DataLoader multiprocess speed
         # todo: add evaluate, predict from array
-        # todo: use function.__name__ and object.__str__() separately
         # todo: use train_on_batch and add log from every batch option
         # todo: add auto permute option
-        # todo: delay before second KeyboardInterupt
         try:
             for e in range(epoch):
-                print('Epoch:', e+1)
+                print('Epoch: {}/{}'.format(e+1, epoch))
                 self.lastext = ''
                 self.start_epoch_time = time.time()
                 self.last_print_time = self.start_epoch_time
@@ -144,10 +145,16 @@ class Model:
                         log[key] = []
                     log[key].append(history_log[key])
         except KeyboardInterrupt:
-            pass
-
-        finally:
+            time.sleep(5)
             return log
+        except Exception as e:
+            cwd = os.getcwd()
+            with open(os.path.join(cwd, 'temp.json', 'r')) as wr:
+                json.dump(log, wr)
+            raise Exception(e)
+        return log
+        # finally:
+        #     return log
 
     def evaluate_generator(self, generator):
         if len(generator) < 1:
@@ -216,44 +223,6 @@ class Model:
                     inputs, targets = x[idx:idx+batch_size], y[idx:idx+batch_size]
                     inputs = inputs.to(self.device)
                     targets = targets.to(self.device)
-                    output = self.model(inputs)
-                    printlog = []
-                    for metric in self.metric:
-                        m_out = metric(output, targets)
-                        if metric.__str__()[:-2] not in history_log:
-                            history_log[metric.__str__()[:-2]] = m_out.cpu().detach().numpy()
-                            printlog.append([metric.__str__()[:-2], m_out.cpu().detach().numpy()])
-                        else:
-                            history_log[metric.__str__()[:-2]] += m_out.cpu().detach().numpy()
-                            printlog.append([metric.__str__()[:-2], history_log[metric.__str__()[:-2]]/(idx+1)])
-
-                    self.optimizer.zero_grad()
-                    m_out.backward()
-                    self.optimizer.step()
-                    total += inputs.size(0)
-
-                    progbar.update(idx-1, printlog)
-
-                for h in history_log:
-                    history_log[h] = history_log[h] / step_per_epoch
-                metrics = []
-                if validation_data:
-                    val_metrics = self.evaluate_generator(validation_data)
-                    for metric in val_metrics:
-                        metrics.append(['val_'+metric, val_metrics[metric]])
-                        if 'val_'+metric not in log:
-                            log['val_'+metric] = []
-                        log['val_'+metric].append(val_metrics[metric])
-                progbar.update(step_per_epoch, metrics, force=True)
-                if lrstep:
-                    schedule.step()
-                for key in history_log:
-                    if key not in log:
-                        log[key] = []
-                    log[key].append(history_log[key])
-        except KeyboardInterrupt:
-            pass
-
         finally:
             return log
 

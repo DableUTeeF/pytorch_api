@@ -1,3 +1,3 @@
 # Upload file to pypi
-python3 setup.py bdist_wheel
-python3 -m twine upload dist/*
+`python3 setup.py bdist_wheel`
+`python3 -m twine upload dist/*`
