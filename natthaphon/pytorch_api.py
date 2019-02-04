@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 import time
-from .utils import Progbar
+from .utils import Progbar, NumpyArrayGenerator, GeneratorEnqueuer
 from torch.optim.optimizer import Optimizer
 import os
 import json
@@ -9,11 +9,23 @@ import numpy as np
 
 
 class Model:
+    r"""
+    Pytorch high-level API similar to keras.
+    Example usage
+    >>> model = Model(nn.Module())
+    >>> model.compile(torch.optim.SGD(model.model.parameters(), 0.1, 0.9), nn.MSELoss(), device='cuda')
+    >>> log = model.fit(x, y, batch_size=32, epoch=5)
+    >>> model.save_weights('weights.t7')
+    >>> with open('log.json', 'r') as wr:
+    >>>     json.dump(log, wr)
+    """
+
     def __init__(self, model, optimizer=None, loss=None):
         self.model = model
         self.optimizer = optimizer
         self.loss = loss
         self.device = 'cpu'
+        self.metric = [loss]
 
     def cuda(self):
         self.to('cuda')
@@ -49,7 +61,7 @@ class Model:
                     raise ValueError('Invalid string loss')
             self.loss = loss
         else:
-            self.loss = nn.BCELoss()
+            self.loss = nn.MSELoss()
         self.metric = []
         if type(metric) != list:
             if metric == 'acc' or metric == 'accuracy':
@@ -84,17 +96,29 @@ class Model:
                       validation_data=None,
                       schedule=None,
                       data_format='channel_first'):
-        if len(generator) < 1:
-            raise ValueError('generator length < 0')
+        r"""
+        :param generator: Training Data Generator - should return x, y in __iter__.
+                          x: A torch tensor or numpy ndarray with shape of (batch, channel, *shape) if
+                             data_format is 'channel_first' or (batch, *shape, channel) if 'channel_last'
+                          y: A torch tensor or numpy ndarray with same shape as what the loss function and
+                             the calculation metrics desire
+        :param epoch: Num epoch to train
+        :param validation_data: A generator or a list of [x, y, batch_size] for validation
+        :param schedule: On epoch end function, must contains step()
+        :param data_format: If 'channel_last', permute input x to channel first before flow through the model
+        :return: Training and validation log
+        """
+        assert len(generator) < 1, 'generator length < 0'
         if self.loss is None:
             self.compile('sgd', None)
         if type(schedule) == list or type(schedule) == tuple:
             schedule = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,
                                                             schedule)
+        if not hasattr(validation_data, '__iter__') and validation_data is not None:
+            assert len(validation_data) == 3, 'validation_data should be a list or a tuple of [x, y, batch_size]'
+            validation_data = NumpyArrayGenerator(*validation_data)
         log = {}
-        # todo: change enumerate(generator) to keras enqueuer
         # todo: test enqueuer multithread and DataLoader multiprocess speed
-        # todo: add evaluate, predict from array
         # todo: use train_on_batch and add log from every batch option
         try:
             for e in range(epoch):
@@ -204,15 +228,25 @@ class Model:
                 history_log[h] = history_log[h] / len(generator)
         return history_log
 
-    def predict_generator(self, generator):
+    def predict_generator(self, generator, data_format='channel_first'):
         self.model.eval()
-        prd = []
+        prd = None
         with torch.no_grad():
             for idx, inputs in enumerate(generator):
                 if type(inputs) == tuple:
                     inputs = inputs[0]
+                if isinstance(inputs, np.ndarray):
+                    inputs = torch.from_numpy(inputs)
                 inputs = inputs.to(self.device)
-                prd.append(self.model(inputs))
+                if data_format == 'channel_last':
+                    inputs_dims = range(len(inputs.size()))
+                    inputs = inputs.permute(0, -1, *inputs_dims[1:-1]).float()
+                inputs = inputs.to(self.device)
+                if prd is None:
+                    prd = self.model(inputs).cpu().detach().numpy()
+                else:
+                    prd = np.concatenate((prd, self.model(inputs).cpu().detach().numpy()),
+                                         axis=0)
         return prd
 
     def fit(self, x, y,
@@ -221,10 +255,21 @@ class Model:
             validation_data=None,
             schedule=None,
             data_format='channel_first'):
-        if len(x) != len(y):
-            raise ValueError('x and y should have same length')
+        """
+        :param x: Numpy array of inputs
+        :param y: Numpy array of target
+        :param batch_size: Train batch size
+        :param epoch: Epoch to train
+        :param validation_data: A generator or a list of [x, y, batch_size] for validation
+        :param schedule: On epoch end function, must contains step()
+        :param data_format: If 'channel_last', permute input x to channel first before flow through the model
+        :return: Training and validation log
+        """
+        assert len(x) != len(y), 'x and y should have same length'
+        assert epoch > 0, 'Epoch should greater than 0'
         if not hasattr(validation_data, '__getitem__') and validation_data is not None:
-            validation_data = NumpyArrayGenerator(*validation_data, batch_size)
+            assert len(validation_data) == 3, 'validation_data should be a list or a tuple of [x, y, batch_size]'
+            validation_data = NumpyArrayGenerator(*validation_data)
         return self.fit_generator(NumpyArrayGenerator(x, y, batch_size),
                                   epoch=epoch,
                                   validation_data=validation_data,
@@ -243,7 +288,7 @@ class Model:
 
     def predict(self, x, batch_size=1, data_format='channel_first'):
         self.model.eval()
-        y = []
+        prd = None
         lenx = int(np.ceil(len(x) / batch_size))
         for i in range(lenx):
             inputs = x[i: i + batch_size]
@@ -253,8 +298,58 @@ class Model:
             if data_format == 'channel_last':
                 inputs_dims = range(len(inputs.size()))
                 inputs = inputs.permute(0, -1, *inputs_dims[1:-1]).float()
-            y.append(self.model(inputs).cpu().detach().numpy())
-        return np.array(y)
+            if prd is None:
+                prd = self.model(inputs).cpu().detach().numpy()
+            else:
+                prd = np.concatenate((prd, self.model(inputs).cpu().detach().numpy()),
+                                     axis=0)
+        return prd
+
+    def fit_enqueuer(self, generator,
+                     epoch,
+                     validation_data=None,
+                     schedule=None,
+                     data_format='channel_first',
+                     num_worker=1):
+        assert epoch > 0, 'Epoch should greater than 0'
+        if not hasattr(validation_data, '__getitem__') and validation_data is not None:
+            assert len(validation_data) == 3, 'validation_data should be a list or a tuple of [x, y, batch_size]'
+            validation_data = NumpyArrayGenerator(*validation_data)
+        train_enqueuer = GeneratorEnqueuer(generator)
+        train_enqueuer.start(workers=num_worker)
+        train_generator = train_enqueuer.get()
+        if validation_data is not None:
+            val_enqueuer = GeneratorEnqueuer(validation_data)
+            val_enqueuer.start(workers=num_worker)
+            val_generator = val_enqueuer.get()
+        else:
+            val_generator = None
+        return self.fit_generator(train_generator,
+                                  epoch=epoch,
+                                  validation_data=val_generator,
+                                  schedule=schedule,
+                                  data_format=data_format
+                                  )
+
+    def evaluate_enqueuer(self, generator,
+                          data_format='channel_first',
+                          num_worker=1):
+        val_enqueuer = GeneratorEnqueuer(generator)
+        val_enqueuer.start(workers=num_worker)
+        val_generator = val_enqueuer.get()
+        return self.evaluate_generator(val_generator,
+                                       data_format=data_format
+                                       )
+
+    def predict_enqueuer(self, generator,
+                         data_format='channel_first',
+                         num_worker=1):
+        enqueuer = GeneratorEnqueuer(generator)
+        enqueuer.start(workers=num_worker)
+        generator = enqueuer.get()
+        return self.predict_generator(generator,
+                                      data_format=data_format
+                                      )
 
     class bce_accuracy:
         def __call__(self, inputs, targets):
@@ -283,28 +378,3 @@ class Model:
         checkpoint = torch.load(path)
         self.model.load_state_dict(checkpoint['net'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])
-
-
-class NumpyArrayGenerator:
-    def __init__(self, x, y, batch_size):
-        self.x = x
-        self.y = y
-        self.batch_size = batch_size
-        self.curidx = -1
-
-    def __len__(self):
-        return int(np.ceil(len(self.x) / self.batch_size))
-
-    def __getitem__(self, idx):
-        i = idx * self.batch_size
-        x = self.x[i:i + self.batch_size]
-        y = self.y[i:i + self.batch_size]
-        return x, y
-
-    def __next__(self):
-        self.curidx += 1
-        return self[self.curidx]
-
-    def __iter__(self):
-        for idx in range(len(self)):
-            yield self[idx]
