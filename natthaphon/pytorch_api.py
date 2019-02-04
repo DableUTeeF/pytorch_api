@@ -5,6 +5,7 @@ from .utils import Progbar
 from torch.optim.optimizer import Optimizer
 import os
 import json
+import numpy as np
 
 
 class Model:
@@ -57,7 +58,8 @@ class Model:
                 elif isinstance(loss, nn.CrossEntropyLoss):  # loss == nn.CrossEntropyLoss():
                     self.metric = [self.categorical_accuracy()]
                 else:
-                    raise ValueError('String metric should use with nn.BCELoss or nn.CrossEntropyLoss, found {}'.format(self.loss))
+                    raise ValueError(
+                        'String metric should use with nn.BCELoss or nn.CrossEntropyLoss, found {}'.format(self.loss))
             else:
                 self.metric = [metric]
         else:
@@ -77,7 +79,11 @@ class Model:
         self.metric.append(self.loss)
         self.to(device)
 
-    def fit_generator(self, generator, epoch, validation_data=None, schedule=None):
+    def fit_generator(self, generator,
+                      epoch,
+                      validation_data=None,
+                      schedule=None,
+                      data_format='channel_first'):
         if len(generator) < 1:
             raise ValueError('generator length < 0')
         if self.loss is None:
@@ -90,10 +96,9 @@ class Model:
         # todo: test enqueuer multithread and DataLoader multiprocess speed
         # todo: add evaluate, predict from array
         # todo: use train_on_batch and add log from every batch option
-        # todo: add auto permute option
         try:
             for e in range(epoch):
-                print('Epoch: {}/{}'.format(e+1, epoch))
+                print('Epoch: {}/{}'.format(e + 1, epoch))
                 self.lastext = ''
                 self.start_epoch_time = time.time()
                 self.last_print_time = self.start_epoch_time
@@ -102,9 +107,15 @@ class Model:
                 progbar = Progbar(len(generator))
                 history_log = {}
                 for idx, (inputs, targets) in enumerate(generator):
+                    if isinstance(inputs, np.ndarray):
+                        inputs = torch.from_numpy(inputs)
+                    if isinstance(targets, np.ndarray):
+                        targets = torch.from_numpy(targets)
                     inputs = inputs.to(self.device)
                     targets = targets.to(self.device)
-                    # inputs = inputs.permute(0, 1, 4, 2, 3).float()
+                    if data_format == 'channel_last':
+                        inputs_dims = range(len(inputs.size()))
+                        inputs = inputs.permute(0, -1, *inputs_dims[1:-1]).float()
                     output = self.model(inputs)
                     printlog = []
                     for metric in self.metric:
@@ -118,7 +129,7 @@ class Model:
                             printlog.append([mname, m_out.cpu().detach().numpy()])
                         else:
                             history_log[mname] += m_out.cpu().detach().numpy()
-                            printlog.append([mname, history_log[mname]/(idx+1)])
+                            printlog.append([mname, history_log[mname] / (idx + 1)])
 
                     self.optimizer.zero_grad()
                     m_out.backward()
@@ -133,10 +144,10 @@ class Model:
                 if validation_data:
                     val_metrics = self.evaluate_generator(validation_data)
                     for metric in val_metrics:
-                        metrics.append(['val_'+metric, val_metrics[metric]])
-                        if 'val_'+metric not in log:
-                            log['val_'+metric] = []
-                        log['val_'+metric].append(val_metrics[metric])
+                        metrics.append(['val_' + metric, val_metrics[metric]])
+                        if 'val_' + metric not in log:
+                            log['val_' + metric] = []
+                        log['val_' + metric].append(val_metrics[metric])
                 progbar.update(len(generator), metrics, force=True)
                 if schedule:
                     schedule.step()
@@ -156,7 +167,7 @@ class Model:
         # finally:
         #     return log
 
-    def evaluate_generator(self, generator):
+    def evaluate_generator(self, generator, data_format='channel_first'):
         if len(generator) < 1:
             raise ValueError('generator length < 0')
         if self.loss is None:
@@ -168,8 +179,15 @@ class Model:
         history_log = {}
         with torch.no_grad():
             for idx, (inputs, targets) in enumerate(generator):
+                if isinstance(inputs, np.ndarray):
+                    inputs = torch.from_numpy(inputs)
+                if isinstance(targets, np.ndarray):
+                    targets = torch.from_numpy(targets)
                 inputs = inputs.to(self.device)
                 targets = targets.to(self.device)
+                if data_format == 'channel_last':
+                    inputs_dims = range(len(inputs.size()))
+                    inputs = inputs.permute(0, -1, *inputs_dims[1:-1]).float()
                 outputs = self.model(inputs)
                 for metric in self.metric:
                     if hasattr(metric, '__name__'):
@@ -187,8 +205,6 @@ class Model:
         return history_log
 
     def predict_generator(self, generator):
-        self.lastext = ''
-        self.start_epoch_time = time.time()
         self.model.eval()
         prd = []
         with torch.no_grad():
@@ -199,37 +215,51 @@ class Model:
                 prd.append(self.model(inputs))
         return prd
 
-    def fit(self, x, y, batch_size, epoch, validation_data=None, lrstep=None):
+    def fit(self, x, y,
+            batch_size,
+            epoch,
+            validation_data=None,
+            schedule=None,
+            data_format='channel_first'):
         if len(x) != len(y):
             raise ValueError('x and y should have same length')
-        if self.loss is None:
-            self.compile('sgd', None)
-        if lrstep:
-            schedule = torch.optim.lr_scheduler.MultiStepLR(self.optimizer,
-                                                            lrstep)
-        step_per_epoch = round(len(x)/batch_size)
-        log = {}
-        try:
-            for e in range(epoch):
-                print('Epoch:', e+1)
-                self.lastext = ''
-                self.start_epoch_time = time.time()
-                self.last_print_time = self.start_epoch_time
-                total = 0
-                self.model.train()
-                progbar = Progbar(len(x))
-                history_log = {}
-                for idx in range(0, len(x), batch_size):
-                    inputs, targets = x[idx:idx+batch_size], y[idx:idx+batch_size]
-                    inputs = inputs.to(self.device)
-                    targets = targets.to(self.device)
-        finally:
-            return log
+        if not hasattr(validation_data, '__getitem__') and validation_data is not None:
+            validation_data = NumpyArrayGenerator(*validation_data, batch_size)
+        return self.fit_generator(NumpyArrayGenerator(x, y, batch_size),
+                                  epoch=epoch,
+                                  validation_data=validation_data,
+                                  schedule=schedule,
+                                  data_format=data_format
+                                  )
+
+    def evaluate(self, x, y,
+                 batch_size=1,
+                 data_format='channel_first'):
+        if len(x) != len(y):
+            raise ValueError('x and y should have same length')
+        return self.evaluate_generator(NumpyArrayGenerator(x, y, batch_size),
+                                       data_format=data_format
+                                       )
+
+    def predict(self, x, batch_size=1, data_format='channel_first'):
+        self.model.eval()
+        y = []
+        lenx = int(np.ceil(len(x) / batch_size))
+        for i in range(lenx):
+            inputs = x[i: i + batch_size]
+            if isinstance(inputs, np.ndarray):
+                inputs = torch.from_numpy(inputs)
+            inputs = inputs.to(self.device)
+            if data_format == 'channel_last':
+                inputs_dims = range(len(inputs.size()))
+                inputs = inputs.permute(0, -1, *inputs_dims[1:-1]).float()
+            y.append(self.model(inputs).cpu().detach().numpy())
+        return np.array(y)
 
     class bce_accuracy:
         def __call__(self, inputs, targets):
             predict = torch.round(inputs)
-            return torch.sum(predict == targets.float()).double()/targets.size(0)
+            return torch.sum(predict == targets.float()).double() / targets.size(0)
 
         def __str__(self):
             return 'bce_accuracy()'
@@ -237,7 +267,7 @@ class Model:
     class categorical_accuracy:
         def __call__(self, inputs, targets):
             _, predicted = inputs.max(1)
-            return predicted.eq(targets.long()).double().sum()/targets.size(0)
+            return predicted.eq(targets.long()).double().sum() / targets.size(0)
 
         def __str__(self):
             return 'categorical_accuracy()'
@@ -253,3 +283,28 @@ class Model:
         checkpoint = torch.load(path)
         self.model.load_state_dict(checkpoint['net'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])
+
+
+class NumpyArrayGenerator:
+    def __init__(self, x, y, batch_size):
+        self.x = x
+        self.y = y
+        self.batch_size = batch_size
+        self.curidx = -1
+
+    def __len__(self):
+        return int(np.ceil(len(self.x) / self.batch_size))
+
+    def __getitem__(self, idx):
+        i = idx * self.batch_size
+        x = self.x[i:i + self.batch_size]
+        y = self.y[i:i + self.batch_size]
+        return x, y
+
+    def __next__(self):
+        self.curidx += 1
+        return self[self.curidx]
+
+    def __iter__(self):
+        for idx in range(len(self)):
+            yield self[idx]

@@ -1,4 +1,4 @@
-from natthaphon import Model
+from natthaphon import Model, NumpyArrayGenerator
 import torch.nn as nn
 import torch
 import numpy as np

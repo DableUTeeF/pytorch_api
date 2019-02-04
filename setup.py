@@ -3,7 +3,7 @@ import setuptools
 
 setuptools.setup(
     name="natthaphon",
-    version="0.0.13",
+    version="0.0.14",
     author="Natthaphon Hongcharoen",
     author_email="palm22180@gmail.com",
     description="A small package for my usage",
