@@ -150,10 +150,9 @@ class Model:
                         m_out = metric(output, targets)
                         if mname not in history_log:
                             history_log[mname] = m_out.cpu().detach().numpy()
-                            printlog.append([mname, m_out.cpu().detach().numpy()])
                         else:
                             history_log[mname] += m_out.cpu().detach().numpy()
-                            printlog.append([mname, history_log[mname] / (idx + 1)])
+                        printlog.append([mname, m_out.cpu().detach().numpy()])
 
                     self.optimizer.zero_grad()
                     m_out.backward()
