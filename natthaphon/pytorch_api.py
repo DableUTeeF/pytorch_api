@@ -105,10 +105,10 @@ class Model:
         :param epoch: Num epoch to train
         :param validation_data: A generator or a list of [x, y, batch_size] for validation
         :param schedule: On epoch end function, must contains step()
-        :param data_format: If 'channel_last', permute input x to channel first before flow through the model
+        :param data_format: Generator's x data format, if 'channel_last', permute input x to channel first before flow through the model
         :return: Training and validation log
         """
-        assert len(generator) < 1, 'generator length < 0'
+        # assert len(generator) < 1, 'generator length < 0'
         if self.loss is None:
             self.compile('sgd', None)
         if type(schedule) == list or type(schedule) == tuple:
@@ -160,7 +160,7 @@ class Model:
                     self.optimizer.step()
                     total += inputs.size(0)
 
-                    progbar.update(idx, printlog)
+                    progbar.update(idx-1, printlog)
 
                 for h in history_log:
                     history_log[h] = history_log[h] / len(generator)
@@ -172,7 +172,7 @@ class Model:
                         if 'val_' + metric not in log:
                             log['val_' + metric] = []
                         log['val_' + metric].append(val_metrics[metric])
-                progbar.update(len(generator), metrics, force=True)
+                progbar.update(len(generator), metrics)
                 if schedule:
                     schedule.step()
                 for key in history_log:
@@ -180,6 +180,8 @@ class Model:
                         log[key] = []
                     log[key].append(history_log[key])
         except KeyboardInterrupt:
+            print('Canceled, returning log in 5 second')
+            print('Press cancel again to raise KeyboardInterrupt')
             time.sleep(5)
             return log
         except Exception as e:
@@ -262,7 +264,7 @@ class Model:
         :param epoch: Epoch to train
         :param validation_data: A generator or a list of [x, y, batch_size] for validation
         :param schedule: On epoch end function, must contains step()
-        :param data_format: If 'channel_last', permute input x to channel first before flow through the model
+        :param data_format: x's data format, if 'channel_last', permute input x to channel first before flow through the model
         :return: Training and validation log
         """
         assert len(x) != len(y), 'x and y should have same length'
