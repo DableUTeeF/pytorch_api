@@ -108,7 +108,7 @@ class Model:
         :param data_format: Generator's x data format, if 'channel_last', permute input x to channel first before flow through the model
         :return: Training and validation log
         """
-        # assert len(generator) < 1, 'generator length < 0'
+        assert len(generator) > 0, 'generator length must larger than 0'
         if self.loss is None:
             self.compile('sgd', None)
         if type(schedule) == list or type(schedule) == tuple:
@@ -194,8 +194,7 @@ class Model:
         #     return log
 
     def evaluate_generator(self, generator, data_format='channel_first'):
-        if len(generator) < 1:
-            raise ValueError('generator length < 0')
+        assert len(generator) > 0, 'generator length must larger than 0'
         if self.loss is None:
             self.compile('sgd', None)
         self.lastext = ''
@@ -267,7 +266,7 @@ class Model:
         :param data_format: x's data format, if 'channel_last', permute input x to channel first before flow through the model
         :return: Training and validation log
         """
-        assert len(x) != len(y), 'x and y should have same length'
+        assert len(x) == len(y), 'x and y should have same length'
         assert epoch > 0, 'Epoch should greater than 0'
         if not hasattr(validation_data, '__getitem__') and validation_data is not None:
             assert len(validation_data) == 3, 'validation_data should be a list or a tuple of [x, y, batch_size]'
@@ -282,7 +281,7 @@ class Model:
     def evaluate(self, x, y,
                  batch_size=1,
                  data_format='channel_first'):
-        if len(x) != len(y):
+        if len(x) == len(y):
             raise ValueError('x and y should have same length')
         return self.evaluate_generator(NumpyArrayGenerator(x, y, batch_size),
                                        data_format=data_format
