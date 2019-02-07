@@ -351,21 +351,19 @@ class Model:
                                       data_format=data_format
                                       )
 
-    class bce_accuracy:
-        def __call__(self, inputs, targets):
+    @staticmethod
+    def bce_accuracy():
+        def __call__(inputs, targets):
             predict = torch.round(inputs)
             return torch.sum(predict == targets.float()).double() / targets.size(0)
+        return __call__
 
-        def __str__(self):
-            return 'bce_accuracy()'
-
-    class categorical_accuracy:
-        def __call__(self, inputs, targets):
+    @staticmethod
+    def categorical_accuracy():
+        def __call__(inputs, targets):
             _, predicted = inputs.max(1)
             return predicted.eq(targets.long()).double().sum() / targets.size(0)
-
-        def __str__(self):
-            return 'categorical_accuracy()'
+        return __call__
 
     def save_weights(self, path):
         state = {
