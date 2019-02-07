@@ -179,13 +179,13 @@ class Model:
                         log[key] = []
                     log[key].append(history_log[key])
         except KeyboardInterrupt:
-            print('Canceled, returning log in 5 second')
+            print('\nCanceled, returning log in 5 second')
             print('Press cancel again to raise KeyboardInterrupt')
             time.sleep(5)
             return log
         except Exception as e:
             cwd = os.getcwd()
-            with open(os.path.join(cwd, 'temp.json', 'r')) as wr:
+            with open(os.path.join(cwd, 'temp.json'), 'w') as wr:
                 json.dump(log, wr)
             raise Exception(e)
         return log
