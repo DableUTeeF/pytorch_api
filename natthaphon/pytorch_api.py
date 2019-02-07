@@ -118,7 +118,6 @@ class Model:
             assert len(validation_data) == 3, 'validation_data should be a list or a tuple of [x, y, batch_size]'
             validation_data = NumpyArrayGenerator(*validation_data)
         log = {}
-        # todo: test enqueuer multithread and DataLoader multiprocess speed
         # todo: use train_on_batch and add log from every batch option
         try:
             for e in range(epoch):

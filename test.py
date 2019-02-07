@@ -1,39 +1,39 @@
-from natthaphon import Model, NumpyArrayGenerator
-import torch.nn as nn
-import torch
-import numpy as np
+import torchvision.datasets as datasets
+from torch.utils.data import DataLoader
+import torchvision.transforms as transforms
+import time
+from natthaphon.utils import GeneratorEnqueuer
 
 
-class M(nn.Module):
-    def __init__(self):
-        super().__init__()
-        self.input = nn.Linear(10, 10)
-        self.output = nn.Linear(10, 1)
-
-    def forward(self, x):
-        x = self.input(x)
-        x = self.output(x)
-        return torch.sigmoid(x)
-
-
-class GenTest:
+class Loader(DataLoader):
     def __next__(self):
-        x = np.random.rand(32, 10)
-        y = np.random.rand(32)
-        x = torch.from_numpy(x).float()
-        y = torch.from_numpy(y).float()
-        return x, y
-
-    def __len__(self):
-        return 100
-
-    def __iter__(self):
-        for x in range(len(self)):
-            yield self.__next__()
+        return
 
 
-if __name__ == '__main__':
-    model = Model(M())
-    model.compile('sgd', nn.BCELoss(), 'acc')
-    h = model.fit_generator(GenTest(), 10000, validation_data=GenTest())
-    print(h)
+# if __name__ == '__main__':
+"""
+MP 8 w: 13.74183440208435
+MT 8 w: 51.31627321243286
+MP 0 w: 46.57823419570923
+"""
+train_dataset = datasets.ImageFolder(
+    '/root/palm/DATA/plant/train',
+    transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+    ]))
+generator = Loader(train_dataset,
+                   batch_size=32,
+                   shuffle=True,
+                   num_workers=8,
+                   pin_memory=False)
+val_enqueuer = GeneratorEnqueuer(generator.__iter__())
+val_enqueuer.start(workers=8)
+trainloader = val_enqueuer.get()
+starttime = time.time()
+batch_time = 0
+for idx, _ in enumerate(generator):
+    # time.sleep(1)
+    print(time.time() - batch_time)
+    batch_time = time.time()
+print(time.time() - starttime)
