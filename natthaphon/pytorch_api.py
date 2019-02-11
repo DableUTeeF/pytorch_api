@@ -310,6 +310,17 @@ class Model:
                      schedule=None,
                      data_format='channel_first',
                      num_worker=1):
+        r"""
+        The enqueuer serise here are to create multithreaded generators from the input generators
+        and then excute fit_generator function.
+        :param generator:
+        :param epoch:
+        :param validation_data:
+        :param schedule:
+        :param data_format:
+        :param num_worker:
+        :return:
+        """
         assert epoch > 0, 'Epoch should greater than 0'
         if not hasattr(validation_data, '__getitem__') and validation_data is not None:
             assert len(validation_data) == 3, 'validation_data should be a list or a tuple of [x, y, batch_size]'
