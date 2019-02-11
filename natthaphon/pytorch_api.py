@@ -363,17 +363,17 @@ class Model:
 
     @staticmethod
     def bce_accuracy():
-        def __call__(inputs, targets):
+        def acc(inputs, targets):
             predict = torch.round(inputs)
             return torch.sum(predict == targets.float()).double() / targets.size(0)
-        return __call__
+        return acc
 
     @staticmethod
     def categorical_accuracy():
-        def __call__(inputs, targets):
+        def acc(inputs, targets):
             _, predicted = inputs.max(1)
             return predicted.eq(targets.long()).double().sum() / targets.size(0)
-        return __call__
+        return acc
 
     def save_weights(self, path):
         state = {

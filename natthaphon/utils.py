@@ -436,3 +436,19 @@ class NumpyArrayGenerator:
     def __iter__(self):
         for idx in range(len(self)):
             yield self[idx]
+
+
+class LambdaLR:
+    def __init__(self, optim, lambda_fn):
+        self.optimizer = optim
+        self.lambda_fn = lambda_fn
+        self.epoch = 0
+        self.last_epoch = -1
+
+    def step(self, epoch=None):
+        if epoch is None:
+            epoch = self.last_epoch + 1
+        self.last_epoch = epoch
+        for param_group in self.optimizer.param_groups:
+            lr = self.lambda_fn(self.last_epoch)
+            param_group['lr'] = lr
