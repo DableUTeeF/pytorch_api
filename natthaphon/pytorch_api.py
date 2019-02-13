@@ -73,7 +73,8 @@ class Model:
                     raise ValueError(
                         'String metric should use with nn.BCELoss or nn.CrossEntropyLoss, found {}'.format(self.loss))
             else:
-                self.metric = [metric]
+                if metric:
+                    self.metric = [metric]
         else:
             for m in metric:
                 if metric == 'acc' or metric == 'accuracy':
@@ -266,7 +267,7 @@ class Model:
         """
         assert len(x) == len(y), 'x and y should have same length'
         assert epoch > 0, 'Epoch should greater than 0'
-        if not hasattr(validation_data, '__getitem__') and validation_data is not None:
+        if isinstance(validation_data, list) or isinstance(validation_data, tuple):
             assert len(validation_data) == 3, 'validation_data should be a list or a tuple of [x, y, batch_size]'
             validation_data = NumpyArrayGenerator(*validation_data)
         return self.fit_generator(NumpyArrayGenerator(x, y, batch_size),
@@ -322,7 +323,7 @@ class Model:
         :return:
         """
         assert epoch > 0, 'Epoch should greater than 0'
-        if not hasattr(validation_data, '__getitem__') and validation_data is not None:
+        if isinstance(validation_data, list) or isinstance(validation_data, tuple):
             assert len(validation_data) == 3, 'validation_data should be a list or a tuple of [x, y, batch_size]'
             validation_data = NumpyArrayGenerator(*validation_data)
         train_enqueuer = GeneratorEnqueuer(generator)
