@@ -3,13 +3,17 @@ import sys
 import tensorflow as tf
 import numpy as np
 import scipy.misc
-from io import BytesIO
+import random
 import os
 import six
 import traceback
 import multiprocessing
 import threading
 import queue
+from contextlib import closing
+from io import BytesIO
+from multiprocessing.pool import ThreadPool
+_SHARED_SEQUENCES = {}
 
 
 class Progbar(object):
@@ -436,6 +440,152 @@ class NumpyArrayGenerator:
     def __iter__(self):
         for idx in range(len(self)):
             yield self[idx]
+
+
+def get_index(uid, i):
+    """Get the value from the Sequence `uid` at index `i`.
+
+    To allow multiple Sequences to be used at the same time, we use `uid` to
+    get a specific one. A single Sequence would cause the validation to
+    overwrite the training Sequence.
+
+    # Arguments
+        uid: int, Sequence identifier
+        i: index
+
+    # Returns
+        The value at index `i`.
+    """
+    return _SHARED_SEQUENCES[uid][i]
+
+
+class OrderedEnqueuer:
+    """Builds a Enqueuer from a Sequence.
+
+    Used in `fit_generator`, `evaluate_generator`, `predict_generator`.
+
+    # Arguments
+        sequence: A `keras.utils.data_utils.Sequence` object.
+        use_multiprocessing: use multiprocessing if True, otherwise threading
+        shuffle: whether to shuffle the data at the beginning of each epoch
+    """
+
+    def __init__(self, sequence,
+                 use_multiprocessing=False,
+                 shuffle=False):
+        self.sequence = sequence
+
+        global _SEQUENCE_COUNTER
+        if _SEQUENCE_COUNTER is None:
+            _SEQUENCE_COUNTER = multiprocessing.Value('i', 0)
+
+        # Doing Multiprocessing.Value += x is not process-safe.
+        with _SEQUENCE_COUNTER.get_lock():
+            self.uid = _SEQUENCE_COUNTER.value
+            _SEQUENCE_COUNTER.value += 1
+        self.use_multiprocessing = use_multiprocessing
+        self.shuffle = shuffle
+        self.workers = 0
+        self.executor_fn = None
+        self.queue = None
+        self.run_thread = None
+        self.stop_signal = None
+
+    def is_running(self):
+        return self.stop_signal is not None and not self.stop_signal.is_set()
+
+    def start(self, workers=1, max_queue_size=10):
+        """Start the handler's workers.
+
+        # Arguments
+            workers: number of worker threads
+            max_queue_size: queue size
+                (when full, workers could block on `put()`)
+        """
+        if self.use_multiprocessing:
+            self.executor_fn = lambda: multiprocessing.Pool(workers)
+        else:
+            self.executor_fn = lambda: ThreadPool(workers)
+        self.workers = workers
+        self.queue = queue.Queue(max_queue_size)
+        self.stop_signal = threading.Event()
+        self.run_thread = threading.Thread(target=self._run)
+        self.run_thread.daemon = True
+        self.run_thread.start()
+
+    def _wait_queue(self):
+        """Wait for the queue to be empty."""
+        while True:
+            time.sleep(0.1)
+            if self.queue.unfinished_tasks == 0 or self.stop_signal.is_set():
+                return
+
+    def _run(self):
+        """Submits request to the executor and queue the `Future` objects."""
+        sequence = list(range(len(self.sequence)))
+        self._send_sequence()  # Share the initial sequence
+        while True:
+            if self.shuffle:
+                random.shuffle(sequence)
+
+            with closing(self.executor_fn()) as executor:
+                for i in sequence:
+                    if self.stop_signal.is_set():
+                        return
+                    self.queue.put(
+                        executor.apply_async(get_index, (self.uid, i)), block=True)
+
+                # Done with the current epoch, waiting for the final batches
+                self._wait_queue()
+
+                if self.stop_signal.is_set():
+                    # We're done
+                    return
+
+            # Call the internal on epoch end.
+            self.sequence.on_epoch_end()
+            self._send_sequence()  # Update the pool
+
+    def get(self):
+        """Creates a generator to extract data from the queue.
+
+        Skip the data if it is `None`.
+
+        # Yields
+            The next element in the queue, i.e. a tuple
+            `(inputs, targets)` or
+            `(inputs, targets, sample_weights)`.
+        """
+        try:
+            while self.is_running():
+                inputs = self.queue.get(block=True).get()
+                self.queue.task_done()
+                if inputs is not None:
+                    yield inputs
+        except Exception as e:
+            self.stop()
+            six.raise_from(StopIteration(e), e)
+
+    def _send_sequence(self):
+        """Send current Sequence to all workers."""
+        # For new processes that may spawn
+        _SHARED_SEQUENCES[self.uid] = self.sequence
+
+    def stop(self, timeout=None):
+        """Stops running threads and wait for them to exit, if necessary.
+
+        Should be called by the same thread which called `start()`.
+
+        # Arguments
+            timeout: maximum time to wait on `thread.join()`
+        """
+        self.stop_signal.set()
+        with self.queue.mutex:
+            self.queue.queue.clear()
+            self.queue.unfinished_tasks = 0
+            self.queue.not_full.notify()
+        self.run_thread.join(timeout)
+        _SHARED_SEQUENCES[self.uid] = None
 
 
 class LambdaLR:

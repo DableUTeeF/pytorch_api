@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 import time
-from .utils import Progbar, NumpyArrayGenerator, GeneratorEnqueuer
+from .utils import Progbar, NumpyArrayGenerator, GeneratorEnqueuer, OrderedEnqueuer
 from torch.optim.optimizer import Optimizer
 import os
 import json
@@ -96,7 +96,10 @@ class Model:
                       epoch,
                       validation_data=None,
                       schedule=None,
-                      data_format='channel_first'):
+                      data_format='channel_first',
+                      step=None,
+                      val_step=None
+                      ):
         r"""
         :param generator: Training Data Generator - should return x, y in __iter__.
                           x: A torch tensor or numpy ndarray with shape of (batch, channel, *shape) if
@@ -109,7 +112,6 @@ class Model:
         :param data_format: Generator's x data format, if 'channel_last', permute input x to channel first before flow through the model
         :return: Training and validation log
         """
-        assert len(generator) > 0, 'generator length must larger than 0'
         if self.loss is None:
             self.compile('sgd', None)
         if type(schedule) == list or type(schedule) == tuple:
@@ -128,7 +130,8 @@ class Model:
                 self.last_print_time = self.start_epoch_time
                 total = 0
                 self.model.train()
-                progbar = Progbar(len(generator))
+                lens = step if step else len(generator)
+                progbar = Progbar(lens)
                 history_log = {}
                 for idx, (inputs, targets) in enumerate(generator):
                     if isinstance(inputs, np.ndarray):
@@ -162,16 +165,17 @@ class Model:
                     progbar.update(idx-1, printlog)
 
                 for h in history_log:
-                    history_log[h] = history_log[h] / len(generator)
+                    history_log[h] = history_log[h] / lens
                 metrics = []
                 if validation_data:
-                    val_metrics = self.evaluate_generator(validation_data)
+                    lens = val_step if val_step else len(validation_data)
+                    val_metrics = self.evaluate_generator(validation_data, lens)
                     for metric in val_metrics:
                         metrics.append(['val_' + metric, val_metrics[metric]])
                         if 'val_' + metric not in log:
                             log['val_' + metric] = []
                         log['val_' + metric].append(val_metrics[metric])
-                progbar.update(len(generator), metrics)
+                progbar.update(lens, metrics)
                 if schedule:
                     schedule.step()
                 for key in history_log:
@@ -192,8 +196,7 @@ class Model:
         # finally:
         #     return log
 
-    def evaluate_generator(self, generator, data_format='channel_first'):
-        assert len(generator) > 0, 'generator length must larger than 0'
+    def evaluate_generator(self, generator, data_format='channel_first', step=None):
         if self.loss is None:
             self.compile('sgd', None)
         self.lastext = ''
@@ -201,6 +204,7 @@ class Model:
         total = 0
         self.model.eval()
         history_log = {}
+        lens = step if step else len(generator)
         with torch.no_grad():
             for idx, (inputs, targets) in enumerate(generator):
                 if isinstance(inputs, np.ndarray):
@@ -225,7 +229,7 @@ class Model:
                         history_log[mname] += m_out.cpu().detach().numpy()
                 total += inputs.size(0)
             for h in history_log:
-                history_log[h] = history_log[h] / len(generator)
+                history_log[h] = history_log[h] / lens
         return history_log
 
     def predict_generator(self, generator, data_format='channel_first'):
@@ -326,11 +330,17 @@ class Model:
         if isinstance(validation_data, list) or isinstance(validation_data, tuple):
             assert len(validation_data) == 3, 'validation_data should be a list or a tuple of [x, y, batch_size]'
             validation_data = NumpyArrayGenerator(*validation_data)
-        train_enqueuer = GeneratorEnqueuer(generator)
+        if hasattr(generator, '__len__'):
+            train_enqueuer = OrderedEnqueuer(generator)
+        else:
+            train_enqueuer = GeneratorEnqueuer(generator)
         train_enqueuer.start(workers=num_worker)
         train_generator = train_enqueuer.get()
         if validation_data is not None:
-            val_enqueuer = GeneratorEnqueuer(validation_data)
+            if hasattr(validation_data, '__len__'):
+                val_enqueuer = OrderedEnqueuer(validation_data)
+            else:
+                val_enqueuer = GeneratorEnqueuer(validation_data)
             val_enqueuer.start(workers=num_worker)
             val_generator = val_enqueuer.get()
         else:
@@ -345,7 +355,10 @@ class Model:
     def evaluate_enqueuer(self, generator,
                           data_format='channel_first',
                           num_worker=1):
-        val_enqueuer = GeneratorEnqueuer(generator)
+        if hasattr(generator, '__len__'):
+            val_enqueuer = OrderedEnqueuer(generator)
+        else:
+            val_enqueuer = GeneratorEnqueuer(generator)
         val_enqueuer.start(workers=num_worker)
         val_generator = val_enqueuer.get()
         return self.evaluate_generator(val_generator,
